@@ -1,14 +1,3 @@
-# ===========================================
-# GEOPTIMALISEERDE PIPELINE
-# ===========================================
-# Verbeteringen:
-# 1. ✅ npm en Docker layer caching
-# 2. ✅ lint, test en security scan draaien parallel
-# 3. ✅ Security checks: npm audit + Trivy
-# 4. ✅ Deploy alleen op main branch
-# 5. ✅ Efficiënte dependency installatie
-# ===========================================
-
 name: Optimized CI/CD Pipeline
 
 on: [push, pull_request]
@@ -75,10 +64,32 @@ jobs:
         if: always()
         run: npm audit --json > audit-report.json || true
 
-  # Build wacht op alle checks (lint, test, security)
+  # CodeQL SAST scanning draait parallel
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+  # Build wacht op alle checks (lint, test, security, codeql)
   build:
     runs-on: ubuntu-latest
-    needs: [lint, test, security-audit]
+    needs: [lint, test, security-audit, codeql]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

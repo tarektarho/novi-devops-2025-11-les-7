@@ -1,10 +1,19 @@
 name: Optimized CI/CD Pipeline
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   # Lint en test draaien parallel
   lint:
+    name: Lint Code
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -23,6 +32,7 @@ jobs:
         run: npm run lint
 
   test:
+    name: Run Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -38,7 +48,14 @@ jobs:
         run: npm ci
 
       - name: Run tests
-        run: npm test
+        run: npm run test:coverage
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
 
   # Security scan draait parallel met lint en test
   security-audit:
@@ -60,9 +77,16 @@ jobs:
         run: npm audit --audit-level=high
         continue-on-error: true
 
-      - name: Upload audit report
+      - name: Generate audit report
         if: always()
         run: npm audit --json > audit-report.json || true
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-report
+          path: audit-report.json
 
   # CodeQL SAST scanning draait parallel
   codeql:
@@ -90,6 +114,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     needs: [lint, test, security-audit, codeql]
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -97,42 +127,39 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=,format=long
+            type=ref,event=branch
       - name: Build Docker image with cache
         uses: docker/build-push-action@v5
         with:
           context: .
-          tags: myapp:latest
-          load: true
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Save Docker image
-        run: docker save myapp:latest -o myapp.tar
-
-      - name: Upload Docker image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker-image
-          path: myapp.tar
-          retention-days: 1
 
   # Container security scan na build
   container-scan:
     runs-on: ubuntu-latest
     needs: build
     steps:
-      - name: Download Docker image
-        uses: actions/download-artifact@v4
-        with:
-          name: docker-image
-
-      - name: Load Docker image
-        run: docker load -i myapp.tar
-
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: "myapp:latest"
+          image-ref: ${{ needs.build.outputs.image-tag }}
           format: "table"
           exit-code: "0"
           severity: "CRITICAL,HIGH"
@@ -143,7 +170,11 @@ jobs:
     needs: [build, container-scan]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
-      - name: Deploy to production
+      - name: Trigger Render Deploy
         run: |
-          echo "Deploying to production..."
-          echo "Only runs on main branch push!"
+          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
+          echo "Deployment triggered!"
+      - name: Wait for deployment
+        run: |
+          echo "Deployment started. Check Render dashboard for status."
+          echo "URL: https://novi-devops-2025-11-les-7.onrender.com/"

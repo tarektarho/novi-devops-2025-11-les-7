@@ -29,28 +29,28 @@ app.get('/api/items', (req, res) => {
 app.get('/api/items/:id', (req, res) => {
   const items = require('./data');
   const item = items.getById(parseInt(req.params.id));
-  
+
   if (!item) {
     return res.status(404).json({ error: 'Item not found' });
   }
-  
+
   res.json(item);
 });
 
 app.post('/api/items', (req, res) => {
   const items = require('./data');
   const { name, description } = req.body;
-  
+
   if (!name) {
     return res.status(400).json({ error: 'Name is required' });
   }
-  
+
   const newItem = items.create({ name, description });
   res.status(201).json(newItem);
 });
 
 // Error handling
-app.use((err, req, res, next) => {
+app.use((err, req, res) => {
   console.error(err.stack);
   res.status(500).json({ error: 'Something went wrong!' });
 });
